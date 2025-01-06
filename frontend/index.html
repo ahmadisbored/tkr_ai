@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Knee X-Ray Segmentation Tool</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css">
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="text-center mb-4">Knee X-Ray Segmentation Tool</h1>
+        
+        <div class="card p-4">
+            <form id="upload-form" enctype="multipart/form-data">
+                <div class="mb-3">
+                    <label for="xray-image" class="form-label">Upload X-Ray Image</label>
+                    <input type="file" class="form-control" id="xray-image" accept="image/*" required>
+                </div>
+                <button type="submit" class="btn btn-primary w-100">Predict</button>
+            </form>
+
+            <div class="mt-4">
+                <label for="conversion-ratio" class="form-label">Pixel to mm Conversion Ratio:</label>
+                <input type="number" id="conversion-ratio" value="0.4" step="0.01" class="form-control">
+            </div>
+
+            <div id="loading" class="text-center mt-4" style="display: none;">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p>Processing image, please wait...</p>
+            </div>
+
+            <div id="results" class="mt-4" style="display: none;">
+                <h3>Results:</h3>
+                <div class="row">
+                    <div class="col-md-6">
+                        <h5>Original Image</h5>
+                        <img id="original-image" class="img-fluid mt-3" alt="Original Image" />
+                    </div>
+                    <div class="col-md-6">
+                        <h5>Segmented Mask</h5>
+                        <img id="segmented-image" class="img-fluid mt-3" alt="Segmented Image" />
+                    </div>
+                </div>
+                <p id="segmentation-output" class="mt-3"></p>
+                <p id="severity-output" class="fw-bold text-primary text-center fs-5 mt-3 border border-primary p-2 rounded"></p>
+                <div id="features-output" class="mt-3"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('upload-form').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            const fileInput = document.getElementById('xray-image');
+            const loading = document.getElementById('loading');
+            const results = document.getElementById('results');
+            const segmentedImage = document.getElementById('segmented-image');
+            const originalImage = document.getElementById('original-image');
+            const segmentationOutput = document.getElementById('segmentation-output');
+            const severityOutput = document.getElementById('severity-output');
+            const featuresOutput = document.getElementById('features-output');
+            const conversionRatioInput = document.getElementById('conversion-ratio');
+
+            if (!fileInput.files.length) {
+                alert('Please upload an X-ray image.');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('image', fileInput.files[0]);
+
+            loading.style.display = 'block';
+            results.style.display = 'none';
+
+            try {
+                const response = await fetch('http://localhost:5000/predict', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    // Display results
+                    segmentationOutput.textContent = 'Segmentation: ' + data.segmentation;
+                    const severityScoreRounded = Math.round(data.severity_score);
+                    severityOutput.innerHTML = `<strong>KL Grade:</strong> ${severityScoreRounded} - <strong>Severity:</strong> ${data.severity}`;
+
+                    // Display features
+                    let featuresText = '<h5 class="mt-4">Measurements:</h5>';
+                    const conversionRatio = parseFloat(conversionRatioInput.value);
+                    featuresText += `<p><strong>Conversion Ratio:</strong> ${conversionRatio} mm/px</p>`;
+
+                    // Separate femur and tibia measurements into boxes
+                    featuresText += '<div class="row mt-3">';
+
+                    // Femur measurements
+                    featuresText += '<div class="col-md-6"><div class="card p-3 mb-3"><h6 class="text-center">Femur Measurements</h6>';
+                    ["femur_proximal_width", "femur_distal_width", "femur_max_width"].forEach(key => {
+                        const formattedKey = key.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+                        const mmValue = (data.features[key] * conversionRatio).toFixed(2);
+                        featuresText += `<p><strong>${formattedKey}:</strong> ${data.features[key]} px (${mmValue} mm)</p>`;
+                    });
+                    featuresText += '</div></div>';
+
+                    // Tibia measurements
+                    featuresText += '<div class="col-md-6"><div class="card p-3 mb-3"><h6 class="text-center">Tibia Measurements</h6>';
+                    ["tibia_proximal_width", "tibia_distal_width", "tibia_max_width"].forEach(key => {
+                        const formattedKey = key.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+                        const mmValue = (data.features[key] * conversionRatio).toFixed(2);
+                        featuresText += `<p><strong>${formattedKey}:</strong> ${data.features[key]} px (${mmValue} mm)</p>`;
+                    });
+                    featuresText += '</div></div>';
+
+                    featuresText += '</div>';
+                    featuresOutput.innerHTML = featuresText;
+
+                    // Display images
+                    segmentedImage.src = 'data:image/png;base64,' + data.segmented_image;
+                    originalImage.src = 'data:image/png;base64,' + data.original_image;
+
+                    results.style.display = 'block';
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('An error occurred while processing the image.');
+            } finally {
+                loading.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
